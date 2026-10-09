@@ -2,6 +2,17 @@
 
 一个跨平台的局域网文件同步工具，支持Windows和Android设备之间的自动文件同步。
 
+## 免责声明与安全现状
+
+**请务必在了解以下事实后再使用：**
+
+1. **默认不加密、不鉴权**：传输面是裸 TCP `Socket`/`ServerSocket`，未启用 TLS。`SecurityService` 虽提供了 TLS `Context` 构造函数与 `openssl` 调用，但**没有任何代码把它们接到 socket 上**。同一网段内任何设备都可发包。
+2. **配对校验形同虚设**：`requestConnection` 生成配对码后**直接 `return true`**，无"等待用户确认"的等待逻辑，配对码也从不参与校验对端。
+3. **接收端未做路径净化**：写入路径由对端包头中的 `relativePath` 直接拼接（`path.join(syncPath, relativePath)`），**恶意对端可尝试写入同步目录之外**。
+4. **收到即落盘**：不校验磁盘空间与文件类型，同名文件直接覆盖，无冲突处理。
+5. **建议**：仅供**同一可信局域网内的个人文件同步**使用；请勿用于传输敏感、机密数据。
+6. **README 原先声明 MIT 许可但仓库内并无 LICENSE 文件**（该问题已在本轮修复中处理，见仓库根 LICENSE）。
+
 ## 功能特性
 
 - 🔄 **自动同步**: 文件夹中的文件变化会自动同步到其他设备
@@ -142,6 +153,46 @@ flutter build apk --release
 - **自适应chunk大小**: 小文件使用64KB，大文件使用1MB
 - **并行传输**: 支持同时传输多个文件
 - **进度实时更新**: 显示传输速度和进度
+
+## 开发进度与已知不足
+
+### 已实现（代码可验证）
+
+- 自研 TCP + UDP 协议：4 字节头长 + JSON 头 + payload 的消息帧；另一套二进制协议（magic `0x4C53594E`、文件头/数据块/完成/进度四类包、CRC32 表）
+- UDP 设备发现（8888 广播、按 deviceId 去重）；按网卡子网逐一计算广播地址并兜底 `255.255.255.255`
+- TCP 传输端口 8889，`shared: true` 多实例绑定，`tcpNoDelay`
+- 自适应传输：chunk 大小与并行度下传、拥塞窗口与慢启动/拥塞避免、四种速度模式（保守/均衡/极速/极限）与设置 UI
+- 网络探测与 `NetworkProfile` 质量分级
+- 接收端 CRC32 校验；临时文件接收完成后改名落盘并建目录
+- 定期扫描式文件监控（1 秒轮询，含隐藏/临时/系统文件过滤）；防回环（接收后 5 秒内忽略同名事件）
+- 离线设备清理（30 秒无广播移除）
+- 6 位配对码生成 + 受信设备白名单持久化（`trusted_devices.json`）+ 受信设备管理 UI
+- Windows 右键菜单（注册 `*\shell`、`Directory\shell`、`Directory\Background\shell` 三条注册表项 + 卸载脚本）；Android 分享 intent-filter 声明
+- 四页 Material 3 UI（首页 / 设备 / 传输 / 设置），含进度条与速度格式化
+
+### 未实现 / 已知不足（**其中第 1 条为阻断性问题**）
+
+1. **收发两端包格式不一致，接收路径实际不可用**：
+   - 发送端文件头含 `chunkSize` / `parallelChunks` 各 4 字节，解析端按**不含**这两字段的布局读取 → 之后所有字段错位
+   - 发送端数据块含 4 字节 transferId 长度 + id，解析端按"24 字节头 + 数据"读 → `dataLength` 读到的是 CRC
+   - 完成标记含 transferId，`_parseComplete` 只读 12 字节且**不回填 `transferId`**，而 `_handleComplete` 依赖它查状态 → 恒为 null
+   - **结论：端到端传输尚未验证成功**。README 原先声称"Windows↔Android 四种场景全部 ✅"是不实描述
+2. **无 TCP 粘包/拆包处理**：`socket.listen` 每次回调被当作"恰好一个完整包"
+3. **断点续传未实现**：`FileTransferResume` / `FileTransferResumeRequest` 只有数据类，无任何发送/接收代码
+4. **`fast_transfer_service.dart` 是死代码**：无文件 import，且其 `_processReceivedData` 定义与调用处参数个数不匹配，接收路径为空壳
+5. **Android 分享收不到文件**：`sharing_service.dart` 的 `startListening()`/`stopListening()` 是空函数，注释称"实现在原生代码中"，但 `MainActivity.kt` 只有一行空类
+6. **不支持文件删除/重命名同步**：watcher 会产出 delete 事件，但主流程只处理 create/modify
+7. 中间进度速度恒定不更新；未信任设备被静默跳过（UI 无提示）
+8. **设备信任在重启后失效**：白名单按 deviceId 持久化，而 deviceId 是每次启动新生成的 v4 UUID
+9. 安全目录用 `Directory.current`，Android 上也走同一路径
+10. 右键菜单路径下 `networkService` 为 null 会抛异常（`send_screen.dart` 用 `appState.networkService!`，而该路径下 `startSync()` 从未被调用）
+11. `send_screen` 构建的 `NetworkService` 未传 `securityService` → 该路径不做信任校验
+12. 接收端无磁盘空间检查、无同名冲突处理；失败/中断后临时文件残留无清理
+13. 自适应参数实际被固定：探测函数是"简化实现"，`medianLatency` 恒为约 50ms、吞吐量恒为 1.28MB/s；探测包发出后无人解析
+14. 大文件存在数据竞争风险（`Uint8List buffer` 复用且不等待分块完成）
+15. 无任何有意义的测试（唯一测试是模板计数器冒烟测试，对本 App 必然失败）；`pairing_verify_dialog.dart` 为死代码
+16. iOS/macOS/Linux 分支仅在设备名里写了判断，无对应 runner 目录
+17. `pubspec.yaml` 描述仍是模板 "A new Flutter project."
 
 ## 注意事项
 
