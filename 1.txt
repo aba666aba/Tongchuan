@@ -1,0 +1,55 @@
+# LAN Sync 打包指令
+
+## 打包 Android APK
+
+```bash
+# 1. 清理旧的构建缓存
+flutter clean
+
+# 2. 获取依赖
+flutter pub get
+
+# 3. 打包 Release APK
+flutter build apk --release
+```
+
+打包完成后，APK 文件位于：
+`build\app\outputs\flutter-apk\app-release.apk`
+
+---
+
+## 打包 Windows EXE
+
+### 前提条件
+需要安装 Visual Studio 并勾选 **"使用 C++ 的桌面开发"** 工作负载。
+
+### 打包命令
+
+```bash
+# 1. 清理旧的构建缓存
+flutter clean
+
+# 2. 获取依赖
+flutter pub get
+
+# 3. 打包 Release EXE
+flutter build windows --release
+```
+
+打包完成后，EXE 文件位于：
+`build\windows\x64\runner\Release\`
+
+---
+
+## 常见问题
+
+### 1. file_picker 编译错误
+如果遇到 `FilePickerPlugin` 找不到的问题，确保使用 `file_picker: ^8.0.0` 版本（pubspec.yaml 中已配置）。
+
+### 2. Android compileSdk 错误
+如果遇到 compileSdk 版本问题，检查 `android\app\build.gradle.kts` 中的 `compileSdk = 36`。
+
+### 3. Visual Studio 未安装
+Windows 打包需要 Visual Studio，下载地址：
+https://visualstudio.microsoft.com/zh-hans/downloads/
+安装时选择 "使用 C++ 的桌面开发" 工作负载。

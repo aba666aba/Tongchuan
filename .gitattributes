@@ -1,0 +1,22 @@
+# 统一换行符处理，避免 Windows/Linux 协作时整文件 diff
+* text=auto eol=lf
+
+# 明确按二进制处理，防止 Git 误改内容
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.jar binary
+*.apk binary
+*.aab binary
+*.keystore binary
+*.jks binary
+*.so binary
+*.dll binary
+*.exe binary
+
+# 归档文件不做 diff、不做换行转换
+*.zip binary
+*.gz binary
+*.7z binary
